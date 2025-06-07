@@ -1,12 +1,15 @@
 import React, { useState, useRef } from 'react';
 import { Link } from 'react-scroll';
-import { Phone, Mail, MapPin, Clock } from 'lucide-react';
+import { Phone, Mail, MapPin, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
-import gsap from 'gsap';
+import { supabase, type Reservation } from '../../lib/supabase';
+import { useLanguage } from '../../context/LanguageContext';
+import { translations } from '../../context/translations';
 
 const ContactSection: React.FC = () => {
   const formRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+  const { language } = useLanguage();
   
   const [formData, setFormData] = useState({
     name: '',
@@ -17,10 +20,77 @@ const ContactSection: React.FC = () => {
     message: ''
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Handle form submission
-    console.log('Form submitted:', formData);
+    setIsSubmitting(true);
+    setSubmitStatus('idle');
+    setErrorMessage('');
+
+    try {
+      // Validate required fields
+      if (!formData.name || !formData.email || !formData.date || !formData.time) {
+        throw new Error('Please fill in all required fields');
+      }
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formData.email)) {
+        throw new Error('Please enter a valid email address');
+      }
+
+      // Validate date is not in the past
+      const selectedDate = new Date(formData.date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (selectedDate < today) {
+        throw new Error('Please select a future date');
+      }
+
+      const reservationData: Omit<Reservation, 'id' | 'created_at'> = {
+        name: formData.name.trim(),
+        email: formData.email.trim().toLowerCase(),
+        date: formData.date,
+        time: formData.time,
+        guests: parseInt(formData.guests),
+        message: formData.message.trim() || null,
+        status: 'pending'
+      };
+
+      const { error } = await supabase
+        .from('reservations')
+        .insert([reservationData]);
+
+      if (error) {
+        throw error;
+      }
+
+      setSubmitStatus('success');
+      setFormData({
+        name: '',
+        email: '',
+        date: '',
+        time: '',
+        guests: '2',
+        message: ''
+      });
+
+      // Auto-hide success message after 5 seconds
+      setTimeout(() => {
+        setSubmitStatus('idle');
+      }, 5000);
+
+    } catch (error: any) {
+      console.error('Error submitting reservation:', error);
+      setSubmitStatus('error');
+      setErrorMessage(error.message || 'An error occurred while submitting your reservation. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -33,25 +103,28 @@ const ContactSection: React.FC = () => {
   const contactInfo = [
     {
       icon: <MapPin size={20} />,
-      title: "Address",
+      title: translations.contact.info.address[language],
       content: "Wiesenhüttenplatz 25, 60329 Frankfurt am Main, Germany"
     },
     {
       icon: <Phone size={20} />,
-      title: "Phone",
+      title: translations.contact.info.phone[language],
       content: "+49 (0) 69 123 456 78"
     },
     {
       icon: <Mail size={20} />,
-      title: "Email",
-      content: "info@madraspalace.de"
+      title: translations.contact.info.email[language],
+      content: "info@bayleafrestaurant.de"
     },
     {
       icon: <Clock size={20} />,
-      title: "Opening Hours",
+      title: translations.contact.info.hours[language],
       content: "Mon-Fri: 12:00 - 22:00\nSat-Sun: 12:00 - 23:00"
     }
   ];
+
+  // Get minimum date (today)
+  const today = new Date().toISOString().split('T')[0];
 
   return (
     <section 
@@ -81,9 +154,11 @@ const ContactSection: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
         >
-          <h2 className="font-display text-4xl md:text-5xl text-white font-bold text-center mb-4">Contact Us</h2>
+          <h2 className="font-display text-4xl md:text-5xl text-white font-bold text-center mb-4">
+            {translations.contact.title[language]}
+          </h2>
           <p className="text-white/80 text-lg md:text-xl max-w-2xl mx-auto text-center mb-12">
-            We'd love to hear from you! Make a reservation or send us your questions.
+            {translations.contact.subtitle[language]}
           </p>
         </motion.div>
         
@@ -95,61 +170,106 @@ const ContactSection: React.FC = () => {
             transition={{ duration: 0.8 }}
             className="bg-white/95 backdrop-blur p-8 rounded-lg shadow-xl"
           >
-            <h3 className="font-display text-2xl mb-6 text-gray-900">Book a Table</h3>
+            <h3 className="font-display text-2xl mb-6 text-gray-900">
+              {translations.navbar.bookTable[language]}
+            </h3>
+            
+            {/* Success Message */}
+            {submitStatus === 'success' && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-6 p-4 bg-green-50 border border-green-200 rounded-md flex items-center"
+              >
+                <CheckCircle className="text-green-600 mr-3" size={20} />
+                <div>
+                  <p className="text-green-800 font-medium">Reservation Submitted Successfully!</p>
+                  <p className="text-green-700 text-sm">We'll contact you soon to confirm your booking.</p>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Error Message */}
+            {submitStatus === 'error' && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md flex items-center"
+              >
+                <AlertCircle className="text-red-600 mr-3" size={20} />
+                <div>
+                  <p className="text-red-800 font-medium">Error Submitting Reservation</p>
+                  <p className="text-red-700 text-sm">{errorMessage}</p>
+                </div>
+              </motion.div>
+            )}
             
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="name" className="block text-gray-700 mb-1">Name</label>
+                  <label htmlFor="name" className="block text-gray-700 mb-1 font-medium">
+                    {translations.contact.form.name[language]} *
+                  </label>
                   <input
                     type="text"
                     id="name"
                     value={formData.name}
                     onChange={handleChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500 focus:border-transparent"
                     placeholder="Your name"
                     required
+                    disabled={isSubmitting}
                   />
                 </div>
                 
                 <div>
-                  <label htmlFor="email" className="block text-gray-700 mb-1">Email</label>
+                  <label htmlFor="email" className="block text-gray-700 mb-1 font-medium">
+                    {translations.contact.form.email[language]} *
+                  </label>
                   <input
                     type="email"
                     id="email"
                     value={formData.email}
                     onChange={handleChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500 focus:border-transparent"
                     placeholder="Your email"
                     required
+                    disabled={isSubmitting}
                   />
                 </div>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="date" className="block text-gray-700 mb-1">Date</label>
+                  <label htmlFor="date" className="block text-gray-700 mb-1 font-medium">
+                    {translations.contact.form.date[language]} *
+                  </label>
                   <input
                     type="date"
                     id="date"
                     value={formData.date}
                     onChange={handleChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500"
+                    min={today}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500 focus:border-transparent"
                     required
+                    disabled={isSubmitting}
                   />
                 </div>
                 
                 <div>
-                  <label htmlFor="time" className="block text-gray-700 mb-1">Time</label>
+                  <label htmlFor="time" className="block text-gray-700 mb-1 font-medium">
+                    {translations.contact.form.time[language]} *
+                  </label>
                   <select
                     id="time"
                     value={formData.time}
                     onChange={handleChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500 focus:border-transparent"
                     required
+                    disabled={isSubmitting}
                   >
                     <option value="">Select time</option>
-                    {['12:00', '13:00', '14:00', '18:00', '19:00', '20:00', '21:00'].map(time => (
+                    {['12:00', '12:30', '13:00', '13:30', '14:00', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00'].map(time => (
                       <option key={time} value={time}>{time}</option>
                     ))}
                   </select>
@@ -157,40 +277,47 @@ const ContactSection: React.FC = () => {
               </div>
               
               <div>
-                <label htmlFor="guests" className="block text-gray-700 mb-1">Number of Guests</label>
+                <label htmlFor="guests" className="block text-gray-700 mb-1 font-medium">
+                  {translations.contact.form.guests[language]} *
+                </label>
                 <select
                   id="guests"
                   value={formData.guests}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500 focus:border-transparent"
                   required
+                  disabled={isSubmitting}
                 >
-                  {[1, 2, 3, 4, 5, 6].map(num => (
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map(num => (
                     <option key={num} value={num}>{num} {num === 1 ? 'person' : 'people'}</option>
                   ))}
-                  <option value="7">6+ people</option>
+                  <option value="9">9+ people (call us)</option>
                 </select>
               </div>
               
               <div>
-                <label htmlFor="message" className="block text-gray-700 mb-1">Special Requests</label>
+                <label htmlFor="message" className="block text-gray-700 mb-1 font-medium">
+                  {translations.contact.form.message[language]}
+                </label>
                 <textarea
                   id="message"
                   value={formData.message}
                   onChange={handleChange}
                   rows={4}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spice-500 focus:border-transparent"
                   placeholder="Any special requests or dietary requirements?"
+                  disabled={isSubmitting}
                 ></textarea>
               </div>
               
               <motion.button
                 type="submit"
-                className="w-full btn-primary"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                className={`w-full btn-primary ${isSubmitting ? 'opacity-75 cursor-not-allowed' : ''}`}
+                whileHover={!isSubmitting ? { scale: 1.02 } : {}}
+                whileTap={!isSubmitting ? { scale: 0.98 } : {}}
+                disabled={isSubmitting}
               >
-                Book Now
+                {isSubmitting ? 'Submitting...' : translations.contact.form.submit[language]}
               </motion.button>
             </form>
           </motion.div>
